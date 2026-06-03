@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Koło Fortuny</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      color: #fff;
+      overflow: hidden;
+    }
+
+    h1 {
+      font-size: 2.2rem;
+      margin-bottom: 2rem;
+      text-shadow: 0 0 20px rgba(255, 215, 0, 0.7);
+      letter-spacing: 2px;
+    }
+
+    .wheel-wrapper {
+      position: relative;
+      width: 380px;
+      height: 380px;
+      margin-bottom: 2rem;
+    }
+
+    .pointer {
+      position: absolute;
+      top: -18px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0;
+      height: 0;
+      border-left: 18px solid transparent;
+      border-right: 18px solid transparent;
+      border-top: 36px solid #ffd700;
+      filter: drop-shadow(0 0 8px rgba(255, 215, 0, 0.9));
+      z-index: 10;
+    }
+
+    canvas {
+      border-radius: 50%;
+      box-shadow:
+        0 0 0 6px #ffd700,
+        0 0 40px rgba(255, 215, 0, 0.4),
+        0 10px 40px rgba(0,0,0,0.5);
+      display: block;
+    }
+
+    .center-pin {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 28px;
+      height: 28px;
+      background: radial-gradient(circle, #fff 30%, #ffd700 100%);
+      border-radius: 50%;
+      box-shadow: 0 0 12px rgba(255,215,0,0.9);
+      z-index: 5;
+    }
+
+    button#spin-btn {
+      padding: 1rem 3.5rem;
+      font-size: 1.3rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+      border: none;
+      border-radius: 50px;
+      background: linear-gradient(135deg, #ffd700, #ff9500);
+      color: #1a1a2e;
+      cursor: pointer;
+      box-shadow: 0 6px 20px rgba(255, 149, 0, 0.5);
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+
+    button#spin-btn:hover:not(:disabled) {
+      transform: translateY(-2px) scale(1.04);
+      box-shadow: 0 10px 28px rgba(255, 149, 0, 0.65);
+    }
+
+    button#spin-btn:active:not(:disabled) {
+      transform: translateY(1px) scale(0.98);
+    }
+
+    button#spin-btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    #result-box {
+      margin-top: 2rem;
+      min-height: 4rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    #result-label {
+      font-size: 1rem;
+      opacity: 0.7;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    }
+
+    #result-value {
+      font-size: 2.4rem;
+      font-weight: 800;
+      text-shadow: 0 0 20px currentColor;
+      transition: opacity 0.3s;
+      min-height: 3rem;
+    }
+
+    @keyframes pop-in {
+      0%   { transform: scale(0.4); opacity: 0; }
+      70%  { transform: scale(1.15); }
+      100% { transform: scale(1);   opacity: 1; }
+    }
+
+    .pop { animation: pop-in 0.45s cubic-bezier(.34,1.56,.64,1) forwards; }
+  </style>
+</head>
+<body>
+
+  <h1>&#127775; Koło Fortuny &#127775;</h1>
+
+  <div class="wheel-wrapper">
+    <div class="pointer"></div>
+    <canvas id="wheel" width="380" height="380"></canvas>
+    <div class="center-pin"></div>
+  </div>
+
+  <button id="spin-btn">KRĘĆ!</button>
+
+  <div id="result-box">
+    <span id="result-label"></span>
+    <span id="result-value"></span>
+  </div>
+
+  <script>
+    const SEGMENTS = [
+      { label: "Owieczka", emoji: "🐑", color: "#e8f5e9", textColor: "#2e7d32" },
+      { label: "Świstuś",  emoji: "🦫", color: "#fff3e0", textColor: "#e65100" },
+      { label: "Wąż",      emoji: "🐍", color: "#fce4ec", textColor: "#880e4f" },
+    ];
+
+    const canvas  = document.getElementById("wheel");
+    const ctx     = canvas.getContext("2d");
+    const btn     = document.getElementById("spin-btn");
+    const resVal  = document.getElementById("result-value");
+    const resLbl  = document.getElementById("result-label");
+
+    const NUM   = SEGMENTS.length;
+    const ARC   = (2 * Math.PI) / NUM;
+    const CX    = canvas.width  / 2;
+    const CY    = canvas.height / 2;
+    const R     = CX - 4;
+
+    let currentAngle = 0;
+    let spinning = false;
+
+    function drawWheel(angle) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      for (let i = 0; i < NUM; i++) {
+        const start = angle + i * ARC;
+        const end   = start + ARC;
+        const seg   = SEGMENTS[i];
+
+        // slice fill
+        ctx.beginPath();
+        ctx.moveTo(CX, CY);
+        ctx.arc(CX, CY, R, start, end);
+        ctx.closePath();
+        ctx.fillStyle = seg.color;
+        ctx.fill();
+        ctx.strokeStyle = "#333";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // text
+        ctx.save();
+        ctx.translate(CX, CY);
+        ctx.rotate(start + ARC / 2);
+        ctx.textAlign = "right";
+        ctx.textBaseline = "middle";
+
+        // emoji
+        ctx.font = "38px serif";
+        ctx.fillText(seg.emoji, R - 14, 0);
+
+        // label
+        ctx.font = "bold 19px 'Segoe UI', sans-serif";
+        ctx.fillStyle = seg.textColor;
+        ctx.fillText(seg.label, R - 60, 0);
+
+        ctx.restore();
+      }
+    }
+
+    // draw initial state
+    drawWheel(currentAngle);
+
+    btn.addEventListener("click", () => {
+      if (spinning) return;
+      spinning = true;
+      btn.disabled = true;
+      resVal.style.opacity = "0";
+      resLbl.textContent = "";
+
+      // random full spins (5-9) + random landing angle
+      const extraSpins  = (5 + Math.floor(Math.random() * 5)) * 2 * Math.PI;
+      const targetAngle = Math.random() * 2 * Math.PI;
+      const totalRotation = extraSpins + targetAngle;
+
+      const duration = 4000 + Math.random() * 1500; // 4–5.5 s
+      const startAngle = currentAngle;
+      let startTime = null;
+
+      function easeOut(t) {
+        // cubic ease-out
+        return 1 - Math.pow(1 - t, 3);
+      }
+
+      function animate(ts) {
+        if (!startTime) startTime = ts;
+        const elapsed = ts - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        const eased = easeOut(progress);
+
+        currentAngle = startAngle + totalRotation * eased;
+        drawWheel(currentAngle);
+
+        if (progress < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          spinning = false;
+          btn.disabled = false;
+          showResult(currentAngle);
+        }
+      }
+
+      requestAnimationFrame(animate);
+    });
+
+    function showResult(angle) {
+      // The pointer is at the top (−π/2 from canvas 0).
+      // Normalise the angle so we know which segment is under the pointer.
+      const normalised = ((angle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      // pointer sits at angle 3π/2 in canvas coords (top of wheel)
+      const pointerAngle = (3 * Math.PI / 2 - normalised + 2 * Math.PI) % (2 * Math.PI);
+      const index = Math.floor(pointerAngle / ARC) % NUM;
+      const seg = SEGMENTS[index];
+
+      resLbl.textContent = "Wylosowano:";
+      resVal.textContent = `${seg.emoji} ${seg.label}`;
+      resVal.style.color = seg.textColor;
+      resVal.style.opacity = "1";
+      resVal.classList.remove("pop");
+      void resVal.offsetWidth; // reflow to restart animation
+      resVal.classList.add("pop");
+    }
+  </script>
+</body>
+</html>
