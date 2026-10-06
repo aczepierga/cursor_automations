@@ -1,6 +1,6 @@
 """Adds narration, sound effects and background music to the rendered Short.
 
-    python flappy-marmot/tools/voiceover.py short.mp4 [out.mp4] [--voice af_heart]
+    python flappy-marmot/tools/voiceover.py short.mp4 [out.mp4] [--voice am_michael+am_onyx]
 
 Reads <short>.timeline.json written by record-short.mjs. Narration uses the
 Kokoro TTS model (pip install kokoro-onnx soundfile numpy); put
@@ -69,8 +69,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("video")
     ap.add_argument("out", nargs="?")
-    ap.add_argument("--voice", default="af_heart")
-    ap.add_argument("--speed", type=float, default=1.15)
+    ap.add_argument("--voice", default="am_michael+am_onyx",
+                    help="Kokoro voice, or several joined with + to blend them equally")
+    ap.add_argument("--speed", type=float, default=1.05)
     ap.add_argument("--models", default=str(here / "models"))
     args = ap.parse_args()
 
@@ -83,16 +84,27 @@ def main():
     models = Path(args.models)
     tts = Kokoro(str(models / "kokoro-v1.0.int8.onnx"), str(models / "voices-v1.0.bin"))
 
+    names = args.voice.split("+")
+    style = sum(tts.get_voice_style(v) for v in names) / len(names)
+    lang = "en-gb" if all(v.startswith("b") for v in names) else "en-us"
+
     n = int(duration * SR)
     voice = np.zeros(n)
     sfx = np.zeros(n)
 
-    for event, delay, _dur, _html, line in timeline["captions"]:
-        if event not in events or not line:
-            continue
-        audio, sr = tts.create(line, voice=args.voice, speed=args.speed, lang="en-us")
+    lines = sorted((events[e] + delay, line) for e, delay, _dur, _html, line in timeline["captions"]
+                   if e in events and line)
+    for i, (at, line) in enumerate(lines):
+        # Room until the next line starts; speak a little faster if it wouldn't fit.
+        room = (lines[i + 1][0] if i + 1 < len(lines) else duration) - at - 0.1
+        speed = args.speed
+        for _ in range(3):
+            audio, sr = tts.create(line, voice=style, speed=speed, lang=lang)
+            if len(audio) / sr <= room or speed >= 1.35:
+                break
+            speed = min(1.35, speed * len(audio) / sr / room * 1.02)
         assert sr == SR
-        place(voice, np.asarray(audio, dtype=float), events[event] + delay)
+        place(voice, np.asarray(audio, dtype=float), at)
 
     for name, at in events.items():
         if name.startswith("flip"):

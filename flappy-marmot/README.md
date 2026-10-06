@@ -21,6 +21,11 @@ pip install kokoro-onnx soundfile numpy
 python flappy-marmot/tools/voiceover.py short.mp4            # -> short-final.mp4
 ```
 
+The default narrator is a deeper male voice, an even mix of `am_michael` and
+`am_onyx`. Pick another with `--voice am_adam`, or blend voices with
+`--voice am_michael+am_onyx`. If a line would run into the next one, it is
+read slightly faster.
+
 `record-short.mjs` renders frame by frame on a virtual clock with a fixed random
 seed, so every run gives the same video. `voiceover.py` adds an AI narrator
 (Kokoro TTS), sound effects and synthesised 8-bit music, all timed to the game
