@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flappy Marmot – Short</title>
+  <!--
+    Recording stage for the YouTube Short: the game auto-plays (bot mode)
+    and timed captions are layered on top. Open it full-screen at 9:16 and
+    screen-record, or run tools/record-short.mjs to render an mp4.
+  -->
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: #10162b; overflow: hidden; }
+    body { display: flex; align-items: center; justify-content: center; }
+
+    .stage {
+      position: relative;
+      height: min(100vh, calc(100vw * 16 / 9));
+      aspect-ratio: 9 / 16;
+      font-size: calc(min(100vh, calc(100vw * 16 / 9)) / 960 * 16);
+    }
+
+    iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+
+    .caption {
+      position: absolute;
+      left: 6%; right: 6%;
+      top: 66%;
+      text-align: center;
+      font: 900 2.35em/1.15 Inter, 'Segoe UI', system-ui, sans-serif;
+      color: #fff;
+      -webkit-text-stroke: 0.14em #10162b;
+      paint-order: stroke fill;
+      text-shadow: 0 0.12em 0.4em rgba(0,0,0,0.6);
+      opacity: 0;
+      pointer-events: none;
+    }
+    .caption .hl  { color: #ffd700; }
+    .caption .red { color: #ff5d73; }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <iframe src="index.html?bot&panic=3"></iframe>
+    <div class="caption" id="cap"></div>
+  </div>
+
+  <script>
+    // Captions are anchored to game events (sent by index.html via postMessage)
+    // so they stay in sync however fast the recording machine is.
+    // [event, delay (s), duration (s), caption html, voice-over line]; events are
+    // "<name>:<run>". tools/voiceover.py reads this list to place the narration.
+    const CAPTIONS = [
+      ["ready:1", 0.2, 2.6, 'I asked AI to make <span class="hl">Flappy Bird</span>',          "I asked AI to make Flappy Bird."],
+      ["ready:1", 2.8, 2.2, 'but with a <span class="hl">MARMOT</span> 🦫',                    "But with a marmot."],
+      ["ready:1", 5.0, 1.6, 'and one extra rule…',                                             "And one extra rule."],
+      ["flip1:1", 0.0, 2.2, '<span class="red">GRAVITY FLIPS EVERY 5 SECONDS</span> 🙃',      "Gravity flips every five seconds!"],
+      ["flip1:1", 2.2, 3.8, '(there\'s no marmot emoji btw.<br>that\'s a beaver. shh 🤫)',     "There's no marmot emoji, by the way. That's a beaver. Shh."],
+      ["flip2:1", 0.6, 3.0, 'AI bot playing it:<br>"this is easy" 😎',                         "The AI bot playing it: this is easy."],
+      ["flip2:1", 3.6, 2.0, 'then came flip #3…',                                              "Then came flip number three."],
+      ["die:1",   0.4, 3.0, 'he froze.<br>like a <span class="hl">real marmot</span> 💀',       "He froze. Like a real marmot."],
+      ["ready:2", 0.0, 4.0, 'ok one more try…',                                                "Okay. One more try."],
+      ["flip1:2", 0.0, 5.0, 'why is this actually<br><span class="hl">kinda addictive??</span>', "Why is this actually kind of addictive?"],
+      ["flip2:2", 0.0, 7.0, 'comment the <span class="hl">NEXT dumb rule</span> 👇<br>I\'ll add it', "Comment the next dumb rule, and I'll add it."],
+    ];
+
+    const cap = document.getElementById("cap");
+    const seen = {};          // event -> time it happened (performance.now() seconds)
+    window.shortTimeline = () => ({ captions: CAPTIONS, events: seen });
+    let current = null;
+
+    window.addEventListener("message", e => {
+      if (typeof e.data !== "string" || !e.data.startsWith("marmot:")) return;
+      const ev = e.data.slice("marmot:".length);
+      if (!(ev in seen)) seen[ev] = performance.now() / 1000;
+    });
+
+    // Pop-in is animated here (not with CSS transitions) so frame-by-frame
+    // rendering in tools/record-short.mjs captures it exactly.
+    function tick() {
+      const now = performance.now() / 1000;
+      // Latest caption whose window contains "now" wins.
+      let active = null, since = 0;
+      for (const c of CAPTIONS) {
+        const at = seen[c[0]];
+        if (at === undefined) continue;
+        if (now >= at + c[1] && now < at + c[1] + c[2]) { active = c; since = now - at - c[1]; }
+      }
+      if (active !== current) {
+        current = active;
+        cap.innerHTML = active ? active[3] : "";
+      }
+      const p = Math.min(1, since / 0.25);
+      const back = 1 + 2.7 * Math.pow(p - 1, 3) + 1.7 * Math.pow(p - 1, 2); // ease-out-back
+      cap.style.opacity = active ? Math.min(1, since / 0.1) : 0;
+      cap.style.transform = `scale(${0.6 + 0.4 * back})`;
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  </script>
+</body>
+</html>

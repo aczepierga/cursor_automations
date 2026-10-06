@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flappy Marmot</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: #10162b;
+      overflow: hidden;
+      font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+      touch-action: manipulation;
+      user-select: none;
+    }
+
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    canvas {
+      display: block;
+      width: min(100vw, calc(100vh * 9 / 16));
+      aspect-ratio: 9 / 16;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game" width="540" height="960"></canvas>
+
+  <script>
+    // ---- Config -----------------------------------------------------------
+    const params  = new URLSearchParams(location.search);
+    const BOT     = params.has("bot");                 // auto-play for recording
+    const PANIC   = (params.get("panic") || "")        // flip numbers on which the bot freezes (first run only)
+      .split(",").filter(Boolean).map(Number);
+    const MUTED   = params.has("mute");
+
+    const W = 540, H = 960;
+    const GRAVITY       = 1700;
+    const FLAP_SPEED    = 560;
+    const PIPE_SPEED    = 210;
+    const PIPE_GAP      = 260;
+    const PIPE_WIDTH    = 96;
+    const PIPE_SPACING  = 320;
+    const FLIP_EVERY    = 5;     // seconds
+    const MARMOT_X      = 150;
+    const MARMOT_R      = 30;
+
+    const DEATH_LINES = [
+      "Gravity: 1, Marmot: 0",
+      "The marmot has filed a complaint.",
+      "That pipe was load-bearing.",
+      "Physics was a mistake.",
+      "He's not dead, he's hibernating.",
+      "Skill issue (gravity's).",
+      "Marmot.exe has stopped working.",
+      "Newton is laughing somewhere.",
+    ];
+
+    const FLIP_LINES = [
+      "GRAVITY HAS LEFT THE CHAT",
+      "DOWN IS UP NOW. DEAL WITH IT.",
+      "WHO TOUCHED THE GRAVITY?",
+      "NEWTON IS CRYING",
+      "THE FLOOR IS THE CEILING",
+    ];
+
+    // ---- Setup ------------------------------------------------------------
+    const canvas = document.getElementById("game");
+    const ctx    = canvas.getContext("2d");
+
+    // Render at the real on-screen resolution so it stays crisp on phones / in recordings.
+    let scale = 1;
+    function resize() {
+      scale = Math.min(4, Math.max(1, (canvas.clientHeight / H) * (window.devicePixelRatio || 1)));
+      canvas.width  = Math.round(W * scale);
+      canvas.height = Math.round(H * scale);
+    }
+    window.addEventListener("resize", resize);
+    resize();
+
+    let state, marmot, pipes, score, best = 0, elapsed, gravDir, flips,
+        flipBanner, shake, deathLine, deadTimer, readyTimer, particles, stars,
+        run = 0, botPanicUntil = 0;
+
+    // Game events for short.html, which times its captions off them.
+    function emit(name) {
+      if (window.parent !== window) window.parent.postMessage(`marmot:${name}:${run}`, "*");
+    }
+
+    function rand(a, b) { return a + Math.random() * (b - a); }
+    function pick(arr)  { return arr[Math.floor(Math.random() * arr.length)]; }
+
+    stars = Array.from({ length: 70 }, () => ({
+      x: rand(0, W), y: rand(0, H), r: rand(0.6, 2.2), s: rand(8, 30),
+    }));
+
+    function reset() {
+      run++;
+      botPanicUntil = 0;
+      state      = "ready";
+      marmot     = { y: H / 2, vy: 0, rot: 0 };
+      pipes      = [];
+      score      = 0;
+      elapsed    = 0;
+      gravDir    = 1;
+      flips      = 0;
+      flipBanner = null;
+      shake      = 0;
+      deathLine  = "";
+      deadTimer  = 0;
+      readyTimer = 0;
+      particles  = [];
+      for (let i = 0; i < 4; i++) spawnPipe(W + 200 + i * PIPE_SPACING);
+      emit("ready");
+    }
+
+    function spawnPipe(x) {
+      const margin = 110;
+      const prev = pipes.length ? pipes[pipes.length - 1].gapY : H / 2;
+      const lo = Math.max(margin + PIPE_GAP / 2, prev - 220);
+      const hi = Math.min(H - margin - PIPE_GAP / 2, prev + 220);
+      pipes.push({ x, gapY: rand(lo, hi), passed: false });
+    }
+
+    // ---- Sound (WebAudio, no files) ---------------------------------------
+    let audio = null;
+    function sfx(type) {
+      if (MUTED) return;
+      try {
+        audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+        const t = audio.currentTime;
+        const o = audio.createOscillator();
+        const g = audio.createGain();
+        o.connect(g); g.connect(audio.destination);
+        if (type === "flap") {
+          o.type = "square";
+          o.frequency.setValueAtTime(520, t);
+          o.frequency.exponentialRampToValueAtTime(880, t + 0.08);
+          g.gain.setValueAtTime(0.06, t);
+          g.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+          o.start(t); o.stop(t + 0.1);
+        } else if (type === "point") {
+          o.type = "triangle";
+          o.frequency.setValueAtTime(880, t);
+          o.frequency.setValueAtTime(1320, t + 0.07);
+          g.gain.setValueAtTime(0.08, t);
+          g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+          o.start(t); o.stop(t + 0.18);
+        } else if (type === "flip") {
+          o.type = "sawtooth";
+          o.frequency.setValueAtTime(gravDir > 0 ? 200 : 900, t);
+          o.frequency.exponentialRampToValueAtTime(gravDir > 0 ? 900 : 200, t + 0.45);
+          g.gain.setValueAtTime(0.08, t);
+          g.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+          o.start(t); o.stop(t + 0.5);
+        } else if (type === "scream") {
+          // the marmot scream (a very sad slide whistle)
+          o.type = "sawtooth";
+          o.frequency.setValueAtTime(1400, t);
+          o.frequency.exponentialRampToValueAtTime(120, t + 0.9);
+          g.gain.setValueAtTime(0.1, t);
+          g.gain.exponentialRampToValueAtTime(0.001, t + 1);
+          o.start(t); o.stop(t + 1);
+        }
+      } catch (e) { /* audio is optional */ }
+    }
+
+    // ---- Input ------------------------------------------------------------
+    function flap() {
+      if (state === "dead") {
+        if (deadTimer > 0.6) reset();
+        return;
+      }
+      if (state === "ready") state = "play";
+      marmot.vy = -gravDir * FLAP_SPEED;
+      sfx("flap");
+    }
+
+    if (!BOT) {
+      window.addEventListener("keydown", e => {
+        if (e.code === "Space" || e.code === "ArrowUp") { e.preventDefault(); flap(); }
+      });
+      canvas.addEventListener("pointerdown", e => { e.preventDefault(); flap(); });
+    }
+
+    // ---- Bot (for recording) ----------------------------------------------
+    function botThink() {
+      if (state === "dead") {
+        if (deadTimer > 2.2) reset();
+        return;
+      }
+      if (state === "ready") { if (readyTimer > 1.5) flap(); return; }
+      if (elapsed < botPanicUntil) return;  // frozen in fear
+
+      const next = pipes.find(p => p.x + PIPE_WIDTH > MARMOT_X - MARMOT_R);
+      const target = next ? next.gapY : H / 2;
+      // Flap once we've fallen (in gravity's direction) a bit past the gap centre;
+      // the flap arc then carries us back over it.
+      const fallen = gravDir * (marmot.y - target);
+      if (fallen > 45 && gravDir * marmot.vy > 0) flap();
+    }
+
+    // ---- Update -----------------------------------------------------------
+    function update(dt) {
+      for (const s of stars) {
+        s.x -= s.s * dt;
+        if (s.x < 0) { s.x = W; s.y = rand(0, H); }
+      }
+
+      particles = particles.filter(p => (p.life -= dt) > 0);
+      for (const p of particles) {
+        p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 600 * dt;
+      }
+      shake = Math.max(0, shake - dt * 30);
+      if (flipBanner) {
+        flipBanner.t += dt;
+        if (flipBanner.t > 1.6) flipBanner = null;
+      }
+
+      if (BOT) botThink();
+
+      if (state === "dead") {
+        deadTimer += dt;
+        marmot.vy += gravDir * GRAVITY * dt;
+        marmot.y  += marmot.vy * dt;
+        marmot.rot += dt * 10;
+        return;
+      }
+      if (state !== "play") {
+        readyTimer += dt;
+        marmot.y = H / 2 + Math.sin(performance.now() / 300) * 14;
+        return;
+      }
+
+      elapsed += dt;
+
+      // Gravity flip
+      if (elapsed >= (flips + 1) * FLIP_EVERY) {
+        flips++;
+        gravDir *= -1;
+        shake = 14;
+        flipBanner = { text: pick(FLIP_LINES), t: 0 };
+        sfx("flip");
+        emit(`flip${flips}`);
+        if (BOT && run === 1 && PANIC.includes(flips)) botPanicUntil = elapsed + 1.4;
+      }
+
+      marmot.vy += gravDir * GRAVITY * dt;
+      marmot.vy  = Math.max(-900, Math.min(900, marmot.vy));
+      marmot.y  += marmot.vy * dt;
+      marmot.rot = Math.max(-0.6, Math.min(1.2, gravDir * marmot.vy / 700));
+
+      for (const p of pipes) {
+        p.x -= PIPE_SPEED * dt;
+        if (!p.passed && p.x + PIPE_WIDTH < MARMOT_X) {
+          p.passed = true;
+          score++;
+          sfx("point");
+        }
+      }
+      if (pipes[0].x < -PIPE_WIDTH) {
+        pipes.shift();
+        spawnPipe(pipes[pipes.length - 1].x + PIPE_SPACING);
+      }
+
+      // Collisions
+      const hitEdge = marmot.y - MARMOT_R < 0 || marmot.y + MARMOT_R > H;
+      const hitPipe = pipes.some(p =>
+        MARMOT_X + MARMOT_R - 6 > p.x && MARMOT_X - MARMOT_R + 6 < p.x + PIPE_WIDTH &&
+        (marmot.y - MARMOT_R + 6 < p.gapY - PIPE_GAP / 2 || marmot.y + MARMOT_R - 6 > p.gapY + PIPE_GAP / 2)
+      );
+      if (hitEdge || hitPipe) die();
+    }
+
+    function die() {
+      state     = "dead";
+      deadTimer = 0;
+      best      = Math.max(best, score);
+      deathLine = pick(DEATH_LINES);
+      flipBanner = null;
+      shake     = 22;
+      marmot.vy = -gravDir * 500;
+      sfx("scream");
+      emit("die");
+      for (let i = 0; i < 28; i++) {
+        particles.push({
+          x: MARMOT_X, y: marmot.y, vx: rand(-320, 320), vy: rand(-520, 120),
+          life: rand(0.6, 1.3), c: pick(["#c98a4b", "#f4d19b", "#ffffff", "#ffd700"]),
+        });
+      }
+    }
+
+    // ---- Render -----------------------------------------------------------
+    function drawText(text, x, y, size, color = "#fff", align = "center") {
+      ctx.font = `900 ${size}px Inter, 'Segoe UI', system-ui, sans-serif`;
+      ctx.textAlign = align;
+      ctx.textBaseline = "middle";
+      ctx.lineJoin = "round";
+      ctx.lineWidth = Math.max(4, size / 6);
+      ctx.strokeStyle = "#10162b";
+      ctx.strokeText(text, x, y);
+      ctx.fillStyle = color;
+      ctx.fillText(text, x, y);
+    }
+
+    function wrapText(text, maxWidth, size) {
+      ctx.font = `900 ${size}px Inter, 'Segoe UI', system-ui, sans-serif`;
+      const words = text.split(" ");
+      const lines = [];
+      let line = "";
+      for (const w of words) {
+        const test = line ? line + " " + w : w;
+        if (ctx.measureText(test).width > maxWidth && line) { lines.push(line); line = w; }
+        else line = test;
+      }
+      lines.push(line);
+      return lines;
+    }
+
+    function drawPipe(p) {
+      const topH = p.gapY - PIPE_GAP / 2;
+      const botY = p.gapY + PIPE_GAP / 2;
+      const grad = ctx.createLinearGradient(p.x, 0, p.x + PIPE_WIDTH, 0);
+      grad.addColorStop(0, "#2fbf71");
+      grad.addColorStop(0.5, "#5ee39a");
+      grad.addColorStop(1, "#1f8f52");
+      ctx.fillStyle = grad;
+      ctx.fillRect(p.x, 0, PIPE_WIDTH, topH);
+      ctx.fillRect(p.x, botY, PIPE_WIDTH, H - botY);
+      ctx.fillStyle = "#1a7a45";
+      ctx.fillRect(p.x - 8, topH - 30, PIPE_WIDTH + 16, 30);
+      ctx.fillRect(p.x - 8, botY, PIPE_WIDTH + 16, 30);
+    }
+
+    function render() {
+      ctx.setTransform(scale, 0, 0, scale, 0, 0);
+      ctx.save();
+      if (shake > 0) ctx.translate(rand(-shake, shake), rand(-shake, shake));
+
+      // Sky flips colour with gravity so the viewer *feels* it
+      const sky = ctx.createLinearGradient(0, 0, 0, H);
+      if (gravDir > 0) { sky.addColorStop(0, "#1b2450"); sky.addColorStop(1, "#4b2a6b"); }
+      else             { sky.addColorStop(0, "#5a1f3d"); sky.addColorStop(1, "#1b2450"); }
+      ctx.fillStyle = sky;
+      ctx.fillRect(-30, -30, W + 60, H + 60);
+
+      ctx.fillStyle = "rgba(255,255,255,0.7)";
+      for (const s of stars) { ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill(); }
+
+      pipes.forEach(drawPipe);
+
+      for (const p of particles) {
+        ctx.globalAlpha = Math.min(1, p.life * 2);
+        ctx.fillStyle = p.c;
+        ctx.fillRect(p.x - 4, p.y - 4, 8, 8);
+      }
+      ctx.globalAlpha = 1;
+
+      // The "marmot" (there is no marmot emoji. this is a beaver. shh.)
+      ctx.save();
+      ctx.translate(MARMOT_X, marmot.y);
+      ctx.rotate(marmot.rot);
+      if (gravDir < 0) ctx.scale(1, -1);
+      ctx.scale(-1, 1); // face right
+      ctx.font = `${MARMOT_R * 2.1}px 'Noto Color Emoji', sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("🦫", 0, 4);
+      ctx.restore();
+
+      // HUD
+      drawText(String(score), W / 2, 90, 84);
+
+      // Gravity indicator + countdown to next flip
+      if (state === "play") {
+        const left = FLIP_EVERY - (elapsed % FLIP_EVERY);
+        const arrow = gravDir > 0 ? "⬇" : "⬆";
+        drawText(`GRAVITY ${arrow}`, 24, H - 40, 26, "#ffd700", "left");
+        if (left < 1.5) {
+          const pulse = 1 + 0.15 * Math.sin(performance.now() / 40);
+          drawText(`FLIP IN ${Math.ceil(left)}…`, W / 2, 190, 44 * pulse, "#ff5d73");
+        }
+      }
+
+      if (flipBanner) {
+        const a = flipBanner.t < 0.15 ? flipBanner.t / 0.15 : Math.max(0, 1 - (flipBanner.t - 1.1) / 0.5);
+        ctx.globalAlpha = a;
+        const lines = wrapText(flipBanner.text, W - 60, 46);
+        lines.forEach((l, i) => drawText(l, W / 2, H / 2 - 160 + i * 56, 46, "#ff5d73"));
+        ctx.globalAlpha = 1;
+      }
+
+      if (state === "ready") {
+        drawText("FLAPPY MARMOT", W / 2, 260, 58, "#ffd700");
+        drawText("(gravity flips every 5 sec)", W / 2, 320, 26);
+        drawText(BOT ? "" : "tap / space to flap", W / 2, H - 200, 28, "#cfd8ff");
+      }
+
+      if (state === "dead") {
+        ctx.fillStyle = "rgba(10,12,30,0.55)";
+        ctx.fillRect(-30, -30, W + 60, H + 60);
+        drawText("RIP", W / 2, H / 2 - 150, 96, "#ff5d73");
+        wrapText(deathLine, W - 80, 38).forEach((l, i) => drawText(l, W / 2, H / 2 - 40 + i * 48, 38));
+        drawText(`score ${score}   best ${best}`, W / 2, H / 2 + 110, 30, "#cfd8ff");
+        if (!BOT && deadTimer > 0.6) drawText("tap to try again", W / 2, H / 2 + 180, 28, "#ffd700");
+      }
+
+      ctx.restore();
+    }
+
+    // ---- Loop -------------------------------------------------------------
+    let last = performance.now();
+    function loop(now) {
+      const dt = Math.min(0.033, (now - last) / 1000);
+      last = now;
+      update(dt);
+      render();
+      requestAnimationFrame(loop);
+    }
+
+    reset();
+    requestAnimationFrame(loop);
+
+  </script>
+</body>
+</html>

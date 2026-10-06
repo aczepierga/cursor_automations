@@ -1,0 +1,4 @@
+node_modules/
+*.mp4
+*.timeline.json
+flappy-marmot/tools/models/
