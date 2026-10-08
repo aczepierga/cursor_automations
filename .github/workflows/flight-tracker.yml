@@ -2,7 +2,8 @@ name: Flight tracker Tromsø
 
 on:
   schedule:
-    - cron: "17 5 * * *" # codziennie ok. 7:17 czasu polskiego
+    # 3 razy dziennie: ok. 7:17, 13:17 i 19:17 czasu polskiego (latem; zimą godzinę wcześniej)
+    - cron: "17 5,11,17 * * *"
   workflow_dispatch:
 
 permissions:
@@ -32,6 +33,7 @@ jobs:
         run: python flight-tracker/tracker.py
 
       - name: Commit report
+        if: always() && steps.track.outcome != 'skipped'
         run: |
           git config user.name "flight-tracker-bot"
           git config user.email "flight-tracker-bot@users.noreply.github.com"

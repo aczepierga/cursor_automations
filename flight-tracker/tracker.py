@@ -113,18 +113,21 @@ def fetch_legs(origin: str, destination: str, day: date, cfg: dict) -> list[Leg]
         if not r.flights or not r.price:
             continue
         first, last = r.flights[0], r.flights[-1]
-        legs.append(
-            Leg(
-                origin=origin,
-                destination=destination,
-                departure=datetime(*first.departure.date, *first.departure.time),
-                arrival=datetime(*last.arrival.date, *last.arrival.time),
-                price=int(r.price),
-                airlines=list(r.airlines),
-                stops=len(r.flights) - 1,
-                url=url,
+        try:
+            legs.append(
+                Leg(
+                    origin=origin,
+                    destination=destination,
+                    departure=datetime(*first.departure.date, *first.departure.time),
+                    arrival=datetime(*last.arrival.date, *last.arrival.time),
+                    price=int(r.price),
+                    airlines=list(r.airlines),
+                    stops=len(r.flights) - 1,
+                    url=url,
+                )
             )
-        )
+        except (TypeError, ValueError) as e:  # niekompletne dane jednego lotu
+            print(f"  ! {origin}->{destination} {day}: pominięto lot ({e!r})", file=sys.stderr)
     return legs
 
 
@@ -285,4 +288,7 @@ def run(cfg: dict, fetch=fetch_legs, sleep=time.sleep, now: datetime | None = No
 
 
 if __name__ == "__main__":
-    run(load_config())
+    result = run(load_config())
+    if not result["best"]:
+        # błąd joba => GitHub wyśle mail, że tracker przestał dostawać dane
+        sys.exit("Nie znaleziono żadnej pary lotów — sprawdź sekcję „Problemy z pobieraniem” w REPORT.md")

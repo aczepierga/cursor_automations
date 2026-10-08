@@ -1,6 +1,6 @@
 # Tracker lotów do Tromsø
 
-Codziennie (GitHub Actions) sprawdza w Google Flights ceny lotów do Tromsø w marcu 2027
+Trzy razy dziennie (GitHub Actions, ok. 7:17, 13:17 i 19:17) sprawdza w Google Flights ceny lotów do Tromsø w marcu 2027
 dla 4 dorosłych i 1 dziecka z bagażem podręcznym. Interesują go tylko pary lotów,
 które dają 2–3 pełne dni na miejscu.
 
@@ -14,11 +14,14 @@ jest polecane tylko wtedy, gdy jest tańsze o ponad 15% (`priority_tolerance_pct
 - Powiadomienie: issue „Tracker lotów do Tromsø” z oznaczeniem właściciela repo
   (GitHub wysyła mail), gdy cena spadnie o ≥5% (`alert_drop_pct`)
   albo pierwszy raz zejdzie poniżej 5000 zł (`alert_below_total_pln`).
+- Gdy żadne lotnisko nie zwróci wyników (np. Google zablokuje zapytania), job kończy się
+  błędem i GitHub wysyła mail o nieudanym workflow.
 
 ## Uruchomienie
 
 - Harmonogram działa dopiero po scaleniu do domyślnej gałęzi repo.
 - Ręcznie: zakładka **Actions → Flight tracker Tromsø → Run workflow**.
+- Częstotliwość: `cron` w `.github/workflows/flight-tracker.yml` (godziny w UTC).
 - Lokalnie: `pip install -r requirements.txt && python tracker.py`.
 - Testy: `pip install pytest && python -m pytest tests`.
 
