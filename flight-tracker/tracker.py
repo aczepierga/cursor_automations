@@ -101,6 +101,10 @@ def fetch_legs(origin: str, destination: str, day: date, cfg: dict) -> list[Leg]
             break
         except FlightsNotFound:
             return []
+        except TypeError:
+            # fast-flights tak reaguje na odpowiedź Google bez żadnych lotów
+            # (np. brak połączeń z dozwoloną liczbą przesiadek) — ponawianie nic nie da
+            return []
         except Exception as e:  # zmiana HTML, blokada, timeout
             last_error = e
             time.sleep(5 * (attempt + 1))
